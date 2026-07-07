@@ -1,0 +1,70 @@
+# Python
+
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+
+venv/
+
+# Environment Files
+
+.env
+.env.local
+
+# Logs
+
+logs/
+live/logs/activity/*.log
+live/logs/journal/*.jsonl
+
+# Runtime State
+
+state/*.lock
+
+# Temporary Files
+
+tmp/
+temp/
+*.tmp
+
+# IDE
+
+.vscode/
+.idea/
+
+# OS
+
+.DS_Store
+Thumbs.db
+
+# Archives
+
+*.tar.gz
+*.zip
+
+# Test Cache
+
+.pytest_cache/
+
+# Jupyter
+
+.ipynb_checkpoints/
+
+# Build
+
+dist/
+build/
+
+config.py
+
+live/archive/
+
+state/*.json
+!state/*.example.json
+
+secrets/*.txt
+!secrets/*.txt.example
+

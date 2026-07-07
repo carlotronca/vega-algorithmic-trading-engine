@@ -1,0 +1,36 @@
+{
+  "version": "2.5",
+  "bot": {
+    "mode": "PAPER",
+    "api_write": false,
+    "is_running": false
+  },
+  "market": {
+    "symbol": "BTC-USDT",
+    "interval": "1h",
+    "last_candle_timestamp": null
+  },
+  "position": {
+    "is_open": false,
+    "symbol": null,
+    "side": null,
+    "entry_price": null,
+    "size": null
+  },
+  "daily": {
+    "date": "YYYY-MM-DD",
+    "start_balance": 0.0,
+    "realized_pnl": 0.0,
+    "max_daily_loss_reached": false
+  },
+  "safety": {
+    "emergency_stop": false,
+    "locked": false,
+    "lock_reason": null
+  },
+  "runtime": {
+    "last_signal_id": null,
+    "last_trade_id": null,
+    "last_error": null
+  }
+}
