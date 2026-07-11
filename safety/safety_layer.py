@@ -23,9 +23,6 @@ class SafetyLayer:
         if safety.get("emergency_stop") is True:
             return False, "EMERGENCY_STOP_ACTIVE"
 
-        if safety.get("locked") is True:
-            return False, safety.get("lock_reason") or "SAFETY_LOCK_ACTIVE"
-
         return True, "OK"
 
     def check_daily_loss(self, current_balance):

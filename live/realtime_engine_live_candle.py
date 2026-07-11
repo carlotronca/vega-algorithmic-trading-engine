@@ -13,7 +13,7 @@ PREFLIGHT_PATH = os.path.join(PROJECT_ROOT, "live", "live_preflight.py")
 FROZEN_RUNTIME_PATH = os.path.join(
     PROJECT_ROOT,
     "live",
-    "realtime_engine_paper_state_and_safety.py"
+    "paper_runtime_safe.py"
 )
 
 

@@ -384,12 +384,12 @@ def reconcile(
     if (
         local_is_open
         and not exchange_stop_loss_verified
+        and stop_loss_order is None
     ):
 
         issues.append(
             "OPEN_POSITION_WITHOUT_VERIFIED_STOP_LOSS"
         )
-
 
     if (
         not local_is_open

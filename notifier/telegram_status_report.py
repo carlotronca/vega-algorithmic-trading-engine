@@ -6,42 +6,147 @@ import socket
 import urllib.request
 import urllib.parse
 import subprocess
+
 from pathlib import Path
 from datetime import datetime, timezone
 
 
-MARKET = os.getenv("BITVAVO_MARKET", "SOL-USDC")
-SERVICE_NAME = os.getenv("BITVAVO_SERVICE", "bitvavo-live")
+# =========================================================
+# CONFIG
+# =========================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MARKET = os.getenv(
+    "BITVAVO_MARKET",
+    "SOL-USDC"
+)
 
-STATE_PATH = PROJECT_ROOT / "state" / "state.json"
-ACTIVITY_LOG_PATH = PROJECT_ROOT / "live" / "logs" / "activity" / "activity.log"
-EVENTS_LOG_PATH = PROJECT_ROOT / "live" / "logs" / "journal" / "events.jsonl"
+SERVICE_NAME = os.getenv(
+    "BITVAVO_SERVICE",
+    "bitvavo-live"
+)
 
-RECONCILIATION_REPORT_PATH = PROJECT_ROOT / "state" / "reconciliation_report.json"
+from state.state_manager import StateManager
 
-SECRETS_DIR = PROJECT_ROOT / "secrets"
-TELEGRAM_BOT_TOKEN_PATH = SECRETS_DIR / "telegram_bot_token.txt"
-TELEGRAM_CHAT_ID_PATH = SECRETS_DIR / "telegram_chat_id.txt"
+state = StateManager().get_state()
 
+MAX_LIVE_NOTIONAL_USDC = (
+    state.get("runtime", {})
+    .get("max_live_notional_usdc", "UNKNOWN")
+)
+
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parent
+    .parent
+)
+
+STATE_PATH = (
+    PROJECT_ROOT
+    / "state"
+    / "state.json"
+)
+
+RECONCILIATION_REPORT_PATH = (
+    PROJECT_ROOT
+    / "state"
+    / "reconciliation_report.json"
+)
+
+ACTIVITY_LOG_PATH = (
+    PROJECT_ROOT
+    / "live"
+    / "logs"
+    / "activity"
+    / "activity.log"
+)
+
+EVENTS_LOG_PATH = (
+    PROJECT_ROOT
+    / "live"
+    / "logs"
+    / "journal"
+    / "events.jsonl"
+)
+
+SECRETS_DIR = (
+    PROJECT_ROOT
+    / "secrets"
+)
+
+TELEGRAM_BOT_TOKEN_PATH = (
+    SECRETS_DIR
+    / "telegram_bot_token.txt"
+)
+
+TELEGRAM_CHAT_ID_PATH = (
+    SECRETS_DIR
+    / "telegram_chat_id.txt"
+)
+
+
+# =========================================================
+# TIME
+# =========================================================
 
 def utc_now():
-    return datetime.now(timezone.utc)
+
+    return datetime.now(
+        timezone.utc
+    )
 
 
 def utc_now_text():
-    return utc_now().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    return utc_now().strftime(
+        "%Y-%m-%d %H:%M:%S UTC"
+    )
 
 
-def read_secret(path: Path):
+# =========================================================
+# FILE HELPERS
+# =========================================================
+
+def read_json(path):
+
     if not path.exists():
-        raise FileNotFoundError(f"Secret file non trovato: {path}")
-    return path.read_text(encoding="utf-8").strip()
+        return {}
 
+    try:
+
+        with path.open(
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            return json.load(f)
+
+    except Exception:
+
+        return {}
+
+
+def read_secret(path):
+
+    if not path.exists():
+
+        raise FileNotFoundError(
+            f"Missing secret: {path}"
+        )
+
+    return path.read_text(
+        encoding="utf-8"
+    ).strip()
+
+
+# =========================================================
+# COMMANDS
+# =========================================================
 
 def run_cmd(cmd, timeout=8):
+
     try:
+
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -49,439 +154,699 @@ def run_cmd(cmd, timeout=8):
             timeout=timeout,
             check=False,
         )
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
-        return stdout or stderr or ""
+
+        stdout = (
+            result.stdout
+            .strip()
+        )
+
+        stderr = (
+            result.stderr
+            .strip()
+        )
+
+        return (
+            stdout
+            or stderr
+            or ""
+        )
+
     except Exception as exc:
+
         return f"ERROR: {exc}"
 
 
-def safe_float(value):
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
-def read_state():
-    if not STATE_PATH.exists():
-        return {}
-
-    try:
-        with STATE_PATH.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def read_reconciliation_report():
-    if not RECONCILIATION_REPORT_PATH.exists():
-        return {}
-
-    try:
-        with RECONCILIATION_REPORT_PATH.open(
-            "r",
-            encoding="utf-8"
-        ) as f:
-            return json.load(f)
-
-    except Exception:
-        return {}
-
-def get_mode_info(state):
-    bot = state.get("bot", {})
-
-    mode = bot.get("mode", "n/a")
-    api_write = bot.get("api_write", "n/a")
-    running = bot.get("is_running", "n/a")
-
-    api_text = "API WRITE ON" if api_write is True else "API WRITE OFF" if api_write is False else "API WRITE n/a"
-
-    if str(mode).lower() == "live" or api_write is True:
-        mode_text = "LIVE REAL"
-    elif str(mode).lower() == "paper":
-        mode_text = "PAPER"
-    else:
-        mode_text = str(mode).upper()
-
-    return mode_text, api_text, running
-
+# =========================================================
+# SYSTEM
+# =========================================================
 
 def get_service_info():
-    active = run_cmd(["systemctl", "is-active", SERVICE_NAME])
 
-    active_since = run_cmd([
-        "systemctl", "show", SERVICE_NAME,
-        "--property=ActiveEnterTimestamp", "--value",
+    active = run_cmd([
+        "systemctl",
+        "is-active",
+        SERVICE_NAME
+    ])
+
+    pid = run_cmd([
+        "systemctl",
+        "show",
+        SERVICE_NAME,
+        "--property=MainPID",
+        "--value"
+    ])
+
+    restarts = run_cmd([
+        "systemctl",
+        "show",
+        SERVICE_NAME,
+        "--property=NRestarts",
+        "--value"
     ])
 
     memory = run_cmd([
-        "systemctl", "show", SERVICE_NAME,
-        "--property=MemoryCurrent", "--value",
+        "systemctl",
+        "show",
+        SERVICE_NAME,
+        "--property=MemoryCurrent",
+        "--value"
     ])
 
-    main_pid = run_cmd([
-        "systemctl", "show", SERVICE_NAME,
-        "--property=MainPID", "--value",
-    ])
-
-    restart_count = run_cmd([
-        "systemctl", "show", SERVICE_NAME,
-        "--property=NRestarts", "--value",
+    uptime = run_cmd([
+        "bash",
+        "-lc",
+        "uptime -p"
     ])
 
     try:
-        memory_mb = f"{int(memory) / 1024 / 1024:.1f} MB"
+
+        memory_mb = (
+            f"{int(memory) / 1024 / 1024:.1f} MB"
+        )
+
     except Exception:
+
         memory_mb = "n/a"
 
     return {
-        "active": active or "n/a",
-        "active_since": active_since or "n/a",
+
+        "active": (
+            active or "n/a"
+        ),
+
+        "pid": (
+            pid or "n/a"
+        ),
+
+        "restarts": (
+            restarts or "n/a"
+        ),
+
         "memory_mb": memory_mb,
-        "main_pid": main_pid or "n/a",
-        "restart_count": restart_count or "n/a",
-    }
 
-
-def get_system_resources():
-    hostname = socket.gethostname()
-    ram_free = run_cmd(["bash", "-lc", "free -m | awk '/Mem:/ {print $4 \" MB\"}'"])
-    loadavg = run_cmd(["bash", "-lc", "cat /proc/loadavg | awk '{print $1, $2, $3}'"])
-    uptime_short = run_cmd(["bash", "-lc", "uptime -p"])
-
-    return {
-        "hostname": hostname,
-        "ram_free": ram_free or "n/a",
-        "loadavg": loadavg or "n/a",
-        "uptime": uptime_short or "n/a",
-    }
-
-
-def get_kernel_messages():
-    output = run_cmd([
-        "bash", "-lc",
-        "journalctl -k -p warning..alert --since '3 hours ago' --no-pager -n 3"
-    ], timeout=10)
-
-    if not output:
-        return "No important kernel messages"
-
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
-    return " | ".join(lines[-3:]) if lines else "No important kernel messages"
-
-
-def get_bitvavo_price():
-    url = f"https://api.bitvavo.com/v2/ticker/price?market={urllib.parse.quote(MARKET)}"
-
-    try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            data = json.loads(response.read().decode("utf-8"))
-
-        if isinstance(data, dict):
-            return data.get("price", "n/a")
-
-        if isinstance(data, list) and data:
-            return data[0].get("price", "n/a")
-
-        return "n/a"
-
-    except Exception as exc:
-        return f"ERROR: {exc}"
-
-
-def get_last_closed_candle():
-    if not ACTIVITY_LOG_PATH.exists():
-        return {
-            "raw": "activity.log non trovato",
-            "timestamp": "n/a",
-            "open": "n/a",
-            "high": "n/a",
-            "low": "n/a",
-            "close": "n/a",
-            "volume": "n/a",
-        }
-
-    try:
-        lines = ACTIVITY_LOG_PATH.read_text(
-            encoding="utf-8",
-            errors="ignore",
-        ).splitlines()
-
-        markers = [
-            "CLOSED CANDLE SENT TO LIVE ENGINE",
-            "CLOSED CANDLE SENT TO PAPER ENGINE",
-        ]
-
-        for i in range(len(lines) - 1, -1, -1):
-            if any(marker in lines[i] for marker in markers):
-                candle_line = None
-
-                for j in range(i + 1, min(i + 6, len(lines))):
-                    if MARKET in lines[j] and " O=" in lines[j] and " C=" in lines[j]:
-                        candle_line = lines[j].strip()
-                        break
-
-                data = {
-                    "raw": candle_line or lines[i].strip(),
-                    "timestamp": "n/a",
-                    "open": "n/a",
-                    "high": "n/a",
-                    "low": "n/a",
-                    "close": "n/a",
-                    "volume": "n/a",
-                }
-
-                if not candle_line:
-                    return data
-
-                for part in candle_line.split():
-                    if part.startswith("ts="):
-                        data["timestamp"] = part.replace("ts=", "")
-                    elif part.startswith("O="):
-                        data["open"] = part.replace("O=", "")
-                    elif part.startswith("H="):
-                        data["high"] = part.replace("H=", "")
-                    elif part.startswith("L="):
-                        data["low"] = part.replace("L=", "")
-                    elif part.startswith("C="):
-                        data["close"] = part.replace("C=", "")
-                    elif part.startswith("V="):
-                        data["volume"] = part.replace("V=", "")
-
-                return data
-
-        return {
-            "raw": "nessuna candela chiusa trovata nel log corrente",
-            "timestamp": "n/a",
-            "open": "n/a",
-            "high": "n/a",
-            "low": "n/a",
-            "close": "n/a",
-            "volume": "n/a",
-        }
-
-    except Exception as exc:
-        return {
-            "raw": f"ERROR reading activity.log: {exc}",
-            "timestamp": "n/a",
-            "open": "n/a",
-            "high": "n/a",
-            "low": "n/a",
-            "close": "n/a",
-            "volume": "n/a",
-        }
-
-
-def get_position_info(state, reconciliation):
-    position = state.get("position", {})
-    daily = state.get("daily", {})
-    account = state.get("account", {})
-
-    exchange = reconciliation.get("exchange", {})
-
-    local = reconciliation.get("local", {})
-
-    current_balance = (
-        exchange.get("usdc_available")
-        or account.get("balance")
-        or account.get("paper_balance")
-        or daily.get("current_balance")
-        or daily.get("balance")
-        or daily.get("start_balance")
-        or "n/a"
-    )
-
-    runtime_position_open = local.get("position_is_open")
-
-    if runtime_position_open is False:
-        return {
-            "balance": current_balance,
-            "position_text": "None",
-        }
-
-
-    symbol = position.get("symbol", MARKET)
-    side = position.get("side", "n/a")
-    entry = position.get("entry_price", "n/a")
-    size = position.get("size", "n/a")
-    sl = position.get("stop_loss", "n/a")
-    tp = position.get("take_profit", "n/a")
-    entry_ts = position.get("entry_timestamp", "n/a")
-
-    return {
-        "balance": current_balance,
-        "position_text": (
-            f"OPEN {symbol} {side}\n"
-            f"Entry: {entry}\n"
-            f"Size: {size}\n"
-            f"TP: {tp}\n"
-            f"SL: {sl}\n"
-            f"Entry time: {entry_ts}"
+        "uptime": (
+            uptime or "n/a"
         ),
     }
 
 
+def get_system_info():
+
+    hostname = socket.gethostname()
+
+    loadavg = run_cmd([
+        "bash",
+        "-lc",
+        "cat /proc/loadavg | awk '{print $1, $2, $3}'"
+    ])
+
+    free_ram = run_cmd([
+        "bash",
+        "-lc",
+        "free -m | awk '/Mem:/ {print $4 \" MB\"}'"
+    ])
+
+    return {
+
+        "hostname": hostname,
+
+        "loadavg": (
+            loadavg or "n/a"
+        ),
+
+        "free_ram": (
+            free_ram or "n/a"
+        ),
+    }
+
+
+# =========================================================
+# MARKET
+# =========================================================
+
+def get_market_price():
+
+    url = (
+        "https://api.bitvavo.com/v2/ticker/price"
+        f"?market={urllib.parse.quote(MARKET)}"
+    )
+
+    try:
+
+        with urllib.request.urlopen(
+            url,
+            timeout=10
+        ) as response:
+
+            data = json.loads(
+                response.read()
+                .decode("utf-8")
+            )
+
+        if isinstance(data, dict):
+
+            return data.get(
+                "price",
+                "n/a"
+            )
+
+        if (
+            isinstance(data, list)
+            and data
+        ):
+
+            return data[0].get(
+                "price",
+                "n/a"
+            )
+
+        return "n/a"
+
+    except Exception as exc:
+
+        return f"ERROR: {exc}"
+
+
+# =========================================================
+# STRATEGY SNAPSHOT
+# =========================================================
+
+def get_last_strategy_snapshot():
+
+    if not ACTIVITY_LOG_PATH.exists():
+
+        return {
+
+            "price": "n/a",
+            "indicators": (
+                "No activity.log"
+            ),
+        }
+
+    try:
+
+        lines = (
+            ACTIVITY_LOG_PATH
+            .read_text(
+                encoding="utf-8",
+                errors="ignore"
+            )
+            .splitlines()
+        )
+
+        closed_price = None
+        indicators = None
+
+        for i in range(
+            len(lines) - 1,
+            -1,
+            -1
+        ):
+
+            line = lines[i].strip()
+
+            if (
+                "💰 CLOSED PRICE"
+                in line
+            ):
+
+                closed_price = line
+
+                for j in range(
+                    i + 1,
+                    min(i + 4, len(lines))
+                ):
+
+                    if (
+                        "📊 EMA9="
+                        in lines[j]
+                    ):
+
+                        indicators = (
+                            lines[j]
+                            .strip()
+                        )
+
+                        break
+
+                break
+
+        return {
+
+            "price": (
+                closed_price
+                or "No closed candle"
+            ),
+
+            "indicators": (
+                indicators
+                or "No indicators"
+            ),
+        }
+
+    except Exception as exc:
+
+        return {
+
+            "price": (
+                f"ERROR: {exc}"
+            ),
+
+            "indicators": "n/a",
+        }
+
+
+# =========================================================
+# WS / EVENTS
+# =========================================================
+
 def read_jsonl_events():
+
     if not EVENTS_LOG_PATH.exists():
         return []
 
     events = []
 
     try:
-        with EVENTS_LOG_PATH.open("r", encoding="utf-8", errors="ignore") as f:
+
+        with EVENTS_LOG_PATH.open(
+            "r",
+            encoding="utf-8",
+            errors="ignore"
+        ) as f:
+
             for line in f:
+
                 line = line.strip()
+
                 if not line:
                     continue
 
                 try:
-                    events.append(json.loads(line))
+
+                    events.append(
+                        json.loads(line)
+                    )
+
                 except Exception:
+
                     continue
 
     except Exception:
+
         return []
 
     return events
 
 
-def get_ws_status_text():
+def get_ws_status():
+
     events = read_jsonl_events()
 
     last_error = None
-    last_restart = None
-    last_stale = None
+    stale = None
 
     for ev in events:
-        event_type = ev.get("event_type")
-        ts = ev.get("logged_at_utc", "n/a")
-        payload = ev.get("payload", {})
 
-        if event_type in {"LIVE_ERROR", "PAPER_ERROR"}:
-            last_error = {
-                "time": ts,
-                "reason": payload.get("error", "n/a"),
-            }
+        event_type = ev.get(
+            "event_type"
+        )
 
-        elif event_type in {"LIVE_STARTED", "PAPER_STARTED"}:
-            last_restart = {
-                "time": ts,
-                "reason": event_type,
-            }
+        ts = ev.get(
+            "logged_at_utc",
+            "n/a"
+        )
+
+        payload = ev.get(
+            "payload",
+            {}
+        )
+
+        if event_type in {
+
+            "LIVE_ERROR",
+            "PAPER_ERROR"
+
+        }:
+
+            last_error = (
+
+                f"{ts} | "
+
+                f"{payload.get('error', 'n/a')}"
+
+            )
 
         elif event_type in {
+
             "LIVE_STALE_CANDLE_STREAM",
             "STALE_CANDLE_STREAM",
             "STALE_CANDLE",
             "WS_STALE",
-            "WATCHDOG_STALE",
+            "WATCHDOG_STALE"
+
         }:
-            last_stale = {
-                "time": ts,
-                "reason": json.dumps(payload, ensure_ascii=False),
-            }
+
+            stale = ts
 
     return {
-        "last_ws_fail_time": last_error["time"] if last_error else "None",
-        "last_ws_fail_reason": last_error["reason"] if last_error else "None",
-        "last_restart_time": last_restart["time"] if last_restart else "n/a",
+
+        "last_error": (
+            last_error or "None"
+        ),
+
         "last_stale": (
-            f"{last_stale['time']} | {last_stale['reason']}"
-            if last_stale else "None recorded"
+            stale or "None"
         ),
     }
 
 
-def get_last_login():
-    output = run_cmd(["bash", "-lc", "last -w -n 5 | grep -v 'wtmp begins' | head -n 1"])
-    return output or "n/a"
+# =========================================================
+# POSITION
+# =========================================================
 
+def get_position_section(
+    state,
+    reconciliation
+):
+
+    position = state.get(
+        "position",
+        {}
+    )
+
+    exchange = reconciliation.get(
+        "exchange",
+        {}
+    )
+
+    local = reconciliation.get(
+        "local",
+        {}
+    )
+
+    balance = exchange.get(
+        "usdc_available",
+        "n/a"
+    )
+
+    is_open = position.get(
+        "is_open",
+        False
+    )
+
+    if not is_open:
+
+        return {
+
+            "balance": balance,
+
+            "text": (
+                "NONE"
+            ),
+
+            "runtime_state": (
+                local.get(
+                    "runtime_position_state",
+                    "n/a"
+                )
+            ),
+
+            "protection": (
+                local.get(
+                    "protection_level",
+                    "n/a"
+                )
+            ),
+
+            "pending_action": (
+                local.get(
+                    "pending_action",
+                    "n/a"
+                )
+            ),
+        }
+
+    return {
+
+        "balance": balance,
+
+        "text": (
+            f"{position.get('symbol')} "
+            f"{position.get('side')}"
+        ),
+
+        "runtime_state": (
+            position.get(
+                "runtime_position_state",
+                "n/a"
+            )
+        ),
+
+        "protection": (
+            position.get(
+                "protection_level",
+                "n/a"
+            )
+        ),
+
+        "pending_action": (
+            position.get(
+                "pending_action",
+                "n/a"
+            )
+        ),
+    }
+
+
+# =========================================================
+# RECONCILIATION
+# =========================================================
+
+def get_reconciliation_text(
+    reconciliation
+):
+
+    status = reconciliation.get(
+        "status",
+        "n/a"
+    )
+
+    issues = reconciliation.get(
+        "issues",
+        []
+    )
+
+    warnings = reconciliation.get(
+        "warnings",
+        []
+    )
+
+    return {
+
+        "status": status,
+
+        "issues": len(issues),
+
+        "warnings": len(warnings),
+    }
+
+
+# =========================================================
+# TELEGRAM
+# =========================================================
 
 def send_telegram_message(text):
-    telegram_bot_token = read_secret(TELEGRAM_BOT_TOKEN_PATH)
-    telegram_chat_id = read_secret(TELEGRAM_CHAT_ID_PATH)
 
-    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+    token = read_secret(
+        TELEGRAM_BOT_TOKEN_PATH
+    )
+
+    chat_id = read_secret(
+        TELEGRAM_CHAT_ID_PATH
+    )
+
+    url = (
+        f"https://api.telegram.org/"
+        f"bot{token}/sendMessage"
+    )
 
     payload = urllib.parse.urlencode({
-        "chat_id": telegram_chat_id,
+
+        "chat_id": chat_id,
+
         "text": text,
+
     }).encode("utf-8")
 
-    with urllib.request.urlopen(url, data=payload, timeout=10) as response:
-        return response.read().decode("utf-8")
+    with urllib.request.urlopen(
+        url,
+        data=payload,
+        timeout=10
+    ) as response:
 
+        return (
+            response.read()
+            .decode("utf-8")
+        )
+
+
+# =========================================================
+# BUILD REPORT
+# =========================================================
 
 def build_report():
-    state = read_state()
 
-    reconciliation = read_reconciliation_report()
+    state = read_json(
+        STATE_PATH
+    )
 
-    mode_text, api_text, running = get_mode_info(state)
+    reconciliation = read_json(
+        RECONCILIATION_REPORT_PATH
+    )
 
     service = get_service_info()
-    system = get_system_resources()
-    kernel = get_kernel_messages()
 
-    price = get_bitvavo_price()
-    candle = get_last_closed_candle()
+    system = get_system_info()
 
-    position = get_position_info(
-        state,
-        reconciliation
+    ws = get_ws_status()
+
+    strategy = (
+        get_last_strategy_snapshot()
     )
 
-    ws = get_ws_status_text()
-    last_login = get_last_login()
+    position = (
+        get_position_section(
+            state,
+            reconciliation
+        )
+    )
 
-    service_icon = "🟢" if service["active"] == "active" else "🔴"
+    recon = (
+        get_reconciliation_text(
+            reconciliation
+        )
+    )
+
+    market_price = (
+        get_market_price()
+    )
+
+    service_icon = (
+
+        "🟢"
+
+        if service["active"] == "active"
+
+        else "🔴"
+
+    )
 
     return (
-        f"{service_icon} BITVAVO BOT HEALTH REPORT\n"
-        f"Time: {utc_now_text()}\n"
-        f"Mode: {mode_text} / {api_text}\n\n"
 
-        f"1) SERVER\n"
-        f"I am alive: YES\n"
-        f"Host: {system['hostname']}\n"
-        f"Service: {SERVICE_NAME} = {service['active']}\n"
-        f"Bot running flag: {running}\n"
-        f"PID: {service['main_pid']}\n"
-        f"Restarts: {service['restart_count']}\n"
-        f"Active since: {service['active_since']}\n"
-        f"Process RAM: {service['memory_mb']}\n"
-        f"Free RAM: {system['ram_free']}\n"
-        f"CPU load: {system['loadavg']}\n"
-        f"Uptime: {system['uptime']}\n"
-        f"Kernel: {kernel}\n\n"
+        f"{service_icon} "
+        f"BITVAVO BOT HEALTH REPORT\n\n"
 
-        f"2) MARKET\n"
-        f"Pair: {MARKET}\n"
-        f"Current price: {price}\n"
-        f"Last closed candle:\n"
-        f"C: {candle['close']} | H: {candle['high']} | L: {candle['low']} | V: {candle['volume']}\n"
-        f"Timestamp: {candle['timestamp']}\n\n"
+        f"Time: "
+        f"{utc_now_text()}\n\n"
 
-        f"3) POSITION\n"
-        f"Balance: {position['balance']}\n"
-        f"Position: {position['position_text']}\n\n"
+        f"RUNTIME\n"
+        f"--------\n"
+        f"Service: "
+        f"{service['active']}\n"
 
-        f"4) WEBSOCKET / STALE / RESTART\n"
-        f"Last WS fail: {ws['last_ws_fail_time']}\n"
-        f"Reason: {ws['last_ws_fail_reason']}\n"
-        f"Last bot restart: {ws['last_restart_time']}\n"
-        f"Last stale: {ws['last_stale']}\n\n"
+        f"PID: "
+        f"{service['pid']}\n"
 
-        f"5) MACHINE ACCESS\n"
-        f"Last login: {last_login}"
+        f"Restarts: "
+        f"{service['restarts']}\n"
+
+        f"Memory: "
+        f"{service['memory_mb']}\n"
+
+        f"Uptime: "
+        f"{service['uptime']}\n"
+
+        f"Host: "
+        f"{system['hostname']}\n"
+
+        f"Free RAM: "
+        f"{system['free_ram']}\n"
+
+        f"CPU Load: "
+        f"{system['loadavg']}\n\n"
+
+        f"MARKET\n"
+        f"------\n"
+        f"Pair: "
+        f"{MARKET}\n"
+
+        f"Price: "
+        f"{market_price}\n\n"
+
+        f"CLOSED CANDLE\n"
+        f"-------------\n"
+        f"{strategy['price']}\n"
+        f"{strategy['indicators']}\n\n"
+
+        f"POSITION\n"
+        f"--------\n"
+        f"Exchange USDC: "
+        f"{position['balance']}\n"
+
+        f"Runtime Max Notional: "
+        f"{MAX_LIVE_NOTIONAL_USDC} USDC\n"
+
+        f"Position: "
+        f"{position['text']}\n"
+
+        f"Runtime State: "
+        f"{position['runtime_state']}\n"
+
+        f"Protection: "
+        f"{position['protection']}\n"
+
+        f"Pending Action: "
+        f"{position['pending_action']}\n\n"
+
+        f"RECONCILIATION\n"
+        f"--------------\n"
+        f"Status: "
+        f"{recon['status']}\n"
+
+        f"Issues: "
+        f"{recon['issues']}\n"
+
+        f"Warnings: "
+        f"{recon['warnings']}\n\n"
+
+        f"WS / WATCHDOG\n"
+        f"-------------\n"
+        f"Last WS Error: "
+        f"{ws['last_error']}\n"
+
+        f"Last Stale: "
+        f"{ws['last_stale']}"
     )
 
 
+# =========================================================
+# MAIN
+# =========================================================
+
 def main():
+
     report = build_report()
-    send_telegram_message(report)
-    print("Telegram LIVE health report sent.")
+
+    send_telegram_message(
+        report
+    )
+
+    print(
+        "Telegram health report sent."
+    )
 
 
 if __name__ == "__main__":
+
     main()

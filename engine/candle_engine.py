@@ -186,8 +186,8 @@ class CandleEngine:
         # =============================================
         #
         # Take profit execution is handled
-        # by realtime update-candle supervision
-        # inside realtime_engine_live.py
+        # by the live runtime during
+        # realtime candle supervision.
         #
         # if (
         #     pos.take_profit is not None

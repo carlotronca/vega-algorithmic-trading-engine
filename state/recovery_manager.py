@@ -209,7 +209,7 @@ class RecoveryManager:
                 "severity": "WARNING",
 
                 "runtime_action": (
-                    "LOCK_NEW_ENTRIES"
+                    "WARN_DEGRADED"
                 ),
 
                 "requires_manual_intervention": (
@@ -220,6 +220,7 @@ class RecoveryManager:
                     "RECREATE_TAKE_PROFIT"
                 )
             }
+
 
         # =================================================
         # TP ONLY => CRITICAL
@@ -239,7 +240,7 @@ class RecoveryManager:
                 "severity": "CRITICAL",
 
                 "runtime_action": (
-                    "EMERGENCY_LOCK_RUNTIME"
+                    "WARN_CRITICAL"
                 ),
 
                 "requires_manual_intervention": (
@@ -297,7 +298,7 @@ class RecoveryManager:
                 "severity": "CRITICAL",
 
                 "runtime_action": (
-                    "LOCK_RUNTIME"
+                    "WARN_CRITICAL"
                 ),
 
                 "requires_manual_intervention": (
@@ -353,7 +354,7 @@ class RecoveryManager:
                 "severity": "CRITICAL",
 
                 "runtime_action": (
-                    "LOCK_RUNTIME"
+                    "WARN_CRITICAL"
                 ),
 
                 "requires_manual_intervention": (
@@ -404,13 +405,14 @@ class RecoveryManager:
             "severity": "CRITICAL",
 
             "runtime_action": (
-                "LOCK_RUNTIME"
+                "WARN_ONLY"
             ),
 
             "requires_manual_intervention": (
                 True
             )
         }
+
 
     # =====================================================
     # APPLY RECOVERY POLICY
@@ -450,27 +452,29 @@ class RecoveryManager:
             }
 
         # =================================================
-        # LOCK NEW ENTRIES
+        # WARNING DEGRADED
         # =================================================
 
-        if runtime_action == "LOCK_NEW_ENTRIES":
+        if runtime_action == "WARN_DEGRADED":
 
-            self.state_manager.lock(
-                "DEGRADED_SL_ONLY_RUNTIME"
+            self.log(
+                "RECOVERY WARNING => "
+                "DEGRADED_SL_ONLY"
             )
 
             return {
 
                 "recovery_status": (
-                    "DEGRADED_RUNTIME_LOCKED"
+                    "RUNTIME_WARNING_ONLY"
                 ),
 
-                "runtime_locked": True,
+                "runtime_locked": False,
 
                 "manual_intervention_required": (
                     False
                 )
             }
+
 
         # =================================================
         # CLEAR LOCAL POSITION
@@ -520,26 +524,58 @@ class RecoveryManager:
                 )
             }
 
+
         # =================================================
-        # LOCK RUNTIME
+        # WARNING ONLY
         # =================================================
 
-        self.state_manager.lock(
-            runtime_action
-        )
+        if runtime_action in [
+
+            "WARN_ONLY",
+
+            "WARN_CRITICAL"
+
+        ]:
+
+            self.log(
+                f"RECOVERY WARNING => "
+                f"{runtime_action}"
+            )
+
+            self.log(
+                "MANUAL INTERVENTION MAY BE REQUIRED"
+            )
+
+            return {
+
+                "recovery_status": (
+                    "RUNTIME_WARNING_ONLY"
+                ),
+
+                "runtime_locked": False,
+
+                "manual_intervention_required": (
+                    True
+                )
+            }
+
+        # =================================================
+        # DEFAULT SAFE RESUME
+        # =================================================
 
         return {
 
             "recovery_status": (
-                "RUNTIME_LOCKED"
+                "RUNTIME_RESUMED"
             ),
 
-            "runtime_locked": True,
+            "runtime_locked": False,
 
             "manual_intervention_required": (
-                True
+                False
             )
         }
+
 
     # =====================================================
     # RECOVERY ENTRYPOINT

@@ -143,29 +143,16 @@ def run_live_preflight_or_raise():
             )
         )
 
-        print("")
-        print("=" * 80)
-        print("DEBUG RECOVERY POLICY")
-        print(recovery_policy)
-        print(f"runtime_action => {runtime_action}")
-        print("=" * 80)
-
         if runtime_action != "CLEAR_LOCAL_POSITION":
 
             raise RuntimeError(
                 f"RECONCILIATION_NOT_OK: {report}"
             )
 
-        print("")
-        print("=" * 80)
         print(
             f"[{utc_now()}] "
-            f"RECOVERY POLICY APPLIED"
+            f"RECOVERY POLICY APPLIED => {runtime_action}"
         )
-        print(recovery_policy)
-        print(recovery_result)
-        print("=" * 80)
-
 
     print("")
     print("=" * 80)
@@ -502,24 +489,9 @@ class LiveRealtimeEngine(CandleEngine):
 
             pos.entry_price = pos.avg_fill_price
 
-            state_manager.update_position_fields({
-
-                "entry_price": pos.entry_price,
-
-                "filled_size": pos.filled_size,
-
-                "avg_fill_price": pos.avg_fill_price,
-
-                "take_profit": pos.take_profit,
-
-                "entry_order_id": (
-                    pos.entry_order_id
-                ),
-
-                "entry_exchange_status": (
-                    pos.entry_exchange_status
-                )
-            })
+            state_manager.save_open_position(
+                pos
+            )
 
             pos.entry_filled_utc = utc_now()
 
@@ -910,9 +882,10 @@ class LiveRealtimeEngine(CandleEngine):
 
         pos.pending_action = "NONE"
 
-        state_manager.update_position_fields({
-            "pending_action": "NONE"
-        })
+        state_manager.transition_position_state(
+            runtime_state="POSITION_OPEN",
+            pending_action="NONE"
+        )
 
         self.reconcile_exchange_balance()
 
@@ -1190,6 +1163,85 @@ def recover_engine_position(
 
     engine.reconcile_exchange_balance()
 
+    try:
+
+        raw_balances = (
+            engine.execution
+            .client
+            .get_balance()
+        )
+
+
+        balances = raw_balances.json()
+
+        sol_balance = 0.0
+
+        usdc_balance = None
+
+        for asset in balances:
+
+            if asset.get("symbol") == "USDC":
+
+                usdc_balance = float(
+                    asset.get(
+                        "available",
+                        0.0
+                    )
+                )
+
+            if asset.get("symbol") == "SOL":
+
+                available = float(
+                    asset.get(
+                        "available",
+                        0.0
+                    )
+                )
+
+                in_order = float(
+                    asset.get(
+                        "inOrder",
+                        0.0
+                    )
+                )
+
+                sol_balance = (
+                    available + in_order
+                )
+
+        if sol_balance <= 0.00001:
+
+            print("")
+            print("=" * 80)
+            print(
+                f"[{utc_now()}] "
+                f"NO EXCHANGE POSITION FOUND"
+            )
+            print(
+                "SOL balance is zero "
+                "-> skipping recovery"
+            )
+            print("=" * 80)
+
+            engine.position = None
+
+            if usdc_balance is not None:
+                engine.balance = usdc_balance
+
+            state_manager.clear_position()
+            return
+
+    except Exception as e:
+
+        print("")
+        print("=" * 80)
+        print(
+            f"[{utc_now()}] "
+            f"RECOVERY RECONCILIATION ERROR"
+        )
+        print(str(e))
+        print("=" * 80)
+
     position_state = (
         state_manager.state.get(
             "position",
@@ -1350,6 +1402,57 @@ def process_closed_candle(closed):
     before_trades = len(engine.trades)
     before_position = engine.position
 
+    # =========================================================
+    # EXCHANGE BALANCE REFRESH
+    # =========================================================
+
+    try:
+
+        raw_balances = (
+            engine.execution
+            .client
+            .get_balance()
+        )
+
+        balances = raw_balances.json()
+
+        for asset in balances:
+
+            if asset.get("symbol") == "USDC":
+
+                available = float(
+                    asset.get(
+                        "available",
+                        0.0
+                    )
+                )
+
+                in_order = float(
+                    asset.get(
+                        "inOrder",
+                        0.0
+                    )
+                )
+
+                engine.balance = (
+                    available + in_order
+                )
+
+                print(
+                    f"[{utc_now()}] "
+                    f"BALANCE REFRESH "
+                    f"USDC={engine.balance}"
+                )
+
+                break
+
+    except Exception as e:
+
+        print(
+            f"[{utc_now()}] "
+            f"BALANCE REFRESH ERROR: {e}"
+        )
+
     engine.on_candle(candle)
 
     after_count = len(engine.strategy.candles)
@@ -1451,6 +1554,87 @@ def on_message(ws, message):
 
             engine = engines.get(market)
 
+            # =====================================
+            # REALTIME TAKE PROFIT CHECK
+            # =====================================
+
+            engine = engines.get(market)
+
+            # =====================================
+            # EXCHANGE POSITION RECONCILIATION
+            # =====================================
+
+            if (
+                engine is not None
+                and engine.position is not None
+                and engine.position.is_open
+            ):
+
+                try:
+
+                    raw_balances = (
+                        engine.execution
+                        .client
+                        .get_balance()
+                    )
+
+                    balances = raw_balances.json()
+
+                    sol_balance = 0.0
+
+                    for asset in balances:
+
+                        if asset.get("symbol") == "SOL":
+
+                            available = float(
+                                asset.get(
+                                    "available",
+                                    0.0
+                                )
+                            )
+
+                            in_order = float(
+                                asset.get(
+                                    "inOrder",
+                                    0.0
+                                )
+                            )
+
+                            sol_balance = (
+                                available + in_order
+                            )
+
+                            break
+
+                    if sol_balance <= 0.00001:
+
+                        print("")
+                        print("=" * 80)
+                        print(
+                            f"[{utc_now()}] "
+                            f"EXCHANGE POSITION CLOSED DETECTED"
+                        )
+                        print(
+                            "SOL balance is zero "
+                            "-> closing local runtime position"
+                        )
+                        print("=" * 80)
+
+                        engine.position = None
+
+                        state_manager.clear_position()
+
+                except Exception as e:
+
+                    print("")
+                    print("=" * 80)
+                    print(
+                        f"[{utc_now()}] "
+                        f"EXCHANGE RECONCILIATION ERROR"
+                    )
+                    print(str(e))
+                    print("=" * 80)
+
             if (
                 engine is not None
                 and engine.position is not None
@@ -1473,10 +1657,10 @@ def on_message(ws, message):
                         "EXITING"
                     )
 
-                    state_manager.update_position_fields({
-                        "pending_action": "EXITING"
-                    })
-
+                    state_manager.transition_position_state(
+                        runtime_state="POSITION_OPEN",
+                        pending_action="EXITING"
+                    )
 
                     print("")
                     print("=" * 80)
@@ -1552,6 +1736,17 @@ def on_message(ws, message):
 
 
 def on_error(ws, error):
+
+    error_str = str(error)
+
+    if "opcode=8" in error_str and "b'\\x03\\xe8'" in error_str:
+        print("")
+        print("=" * 80)
+        print(f"[{utc_now()}] LIVE WS CLOSED NORMAL")
+        print(error)
+        print("=" * 80)
+        return
+
     print("")
     print("=" * 80)
     print(f"[{utc_now()}] LIVE ERROR")
@@ -1563,10 +1758,9 @@ def on_error(ws, error):
     journal.log_event(
         event_type="LIVE_ERROR",
         payload={
-            "error": str(error)
+            "error": error_str
         }
     )
-
 
 def on_close(ws, code, msg):
     clear_current_ws(ws)
@@ -1593,7 +1787,15 @@ def main():
 
     run_live_preflight_or_raise()
 
+    state_manager.load()
+
     state_manager.set_bot_running(True)
+
+    state_manager.state["runtime"][
+        "max_live_notional_usdc"
+    ] = MAX_LIVE_NOTIONAL_USDC
+
+    state_manager.save()
 
     initialize_engines()
 

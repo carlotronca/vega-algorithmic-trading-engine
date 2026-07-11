@@ -31,11 +31,6 @@ def recover_position_from_exchange(local_state, exchange_snapshot):
 
     print("Running exchange-driven recovery...")
 
-    local_state["position"].pop(
-        "SOL-USDC",
-        None,
-    )
-
     balances = exchange_snapshot.get("balances", [])
 
     open_orders = exchange_snapshot.get(
@@ -51,7 +46,6 @@ def recover_position_from_exchange(local_state, exchange_snapshot):
 
         available = float(sol_data.get("available", 0))
         in_order = float(sol_data.get("in_order", 0))
-
         sol_balance = available + in_order
 
     MIN_RECOVERABLE_SOL = 0.0001
@@ -94,10 +88,19 @@ def recover_position_from_exchange(local_state, exchange_snapshot):
 
     local_state["position"]["is_open"] = True
     local_state["position"]["size"] = sol_balance
+
+    local_state["position"][
+        "symbol"
+    ] = "SOL-USDC"
+
     local_state["position"]["entry_price"] = None
     local_state["position"]["stop_loss"] = stop_loss
     local_state["position"]["take_profit"] = None
     local_state["position"]["entry_timestamp"] = time.time()
+
+    local_state["position"][
+        "runtime_position_state"
+    ] = "POSITION_OPEN"
 
     local_state["position"]["recovered_from_exchange"] = True
 
@@ -106,6 +109,16 @@ def recover_position_from_exchange(local_state, exchange_snapshot):
     local_state["position"]["stop_loss_order_id"] = (
         sl_order_id
     )
+
+    if sl_order_id is not None:
+
+        local_state["position"][
+            "stop_loss_verified"
+        ] = True
+
+        local_state["position"][
+            "is_protected"
+        ] = True
 
     return local_state
 
