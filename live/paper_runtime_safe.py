@@ -17,7 +17,7 @@ if PROJECT_ROOT not in sys.path:
 
 
 from market.candle import Candle
-from strategy import EMAVolumeStrategy
+from strategies.trend_following_long.strategy import EMAVolumeStrategy
 from engine.candle_engine import CandleEngine
 from models.signal import Signal
 from live.rest_bootstrap import RestBootstrap
